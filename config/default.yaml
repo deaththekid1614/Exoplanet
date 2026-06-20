@@ -1,0 +1,91 @@
+# TESS Transit Detection Pipeline — GOD MODE Configuration
+# Optimized for MacBook 2015, 8GB RAM, CPU-only
+
+paths:
+  raw: data/raw
+  processed: data/processed
+  candidates: data/candidates
+  gaia_cache: data/gaia_cache
+  training: data/training
+  models: models
+  results: outputs/results
+  plots: outputs/plots
+  reports: outputs/reports
+
+# Stage 1: Preprocessing
+preprocess:
+  batch_size: 100
+  savgol_window_days: 0.5
+  savgol_polyorder: 3
+  quality_bitmask: "default"
+  synthetic_validation_count: 10
+  synthetic_recovery_threshold: 0.95
+  n_jobs: 4
+
+# Stage 2: Detection
+detection:
+  period_min: 0.5
+  period_max: 27.0
+  bls_sde_threshold: 4.0
+  bls_duration_grid: [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10]
+  n_jobs: 4
+  tls_oversampling: 10
+  tls_duration_grid: [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10]
+
+# Stage 3: Gaia
+gaia:
+  cache_enabled: true
+  query_batch_size: 50
+  retry_attempts: 3
+  retry_delay_seconds: 5
+
+# Stage 4: Physics checks
+physics:
+  centroid_top_fraction: 0.10
+  centroid_shift_threshold_pixels: 0.1
+  secondary_eclipse_alpha: 0.05
+  odd_even_ratio_tolerance: 0.25
+  achromaticity_bands: [UV, Blue, Green, Yellow, Red, IR]
+
+# Stage 5: Classification
+classification:
+  train_split: 0.8
+  random_seed: 42
+
+# Stage 6: Parameter estimation
+parameters:
+  bootstrap_iterations: 100
+  mandel_agol_oversample: 5
+
+# Stage 7: Ensemble scoring weights
+ensemble:
+  weights:
+    ml_probability: 0.30
+    depth_check: 0.15
+    shape_check: 0.15
+    eclipse_check: 0.10
+    centroid_check: 0.10
+    odd_even_check: 0.10
+    achromaticity: 0.10
+  thresholds:
+    transit_high: 0.55
+    transit_medium: 0.35
+    eclipse: 0.80
+    blend: 0.75
+    stellar_activity: 0.75
+    uncertain_low: 0.25
+    reject: 0.50
+
+# Stage 8: Visualization
+visualization:
+  top_n_candidates: 100
+  dpi: 100
+  figure_format: png
+
+# Pipeline runtime
+pipeline:
+  sector: null  # e.g. 14 — set via CLI
+  max_curves: null  # limit for testing; null = all
+  tic_ids_file: null  # path to TIC ID list
+  skip_download: false
+  demo_mode: false

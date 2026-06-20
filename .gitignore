@@ -1,0 +1,31 @@
+# Data
+data/raw/
+data/processed/
+data/candidates/
+data/gaia_cache/
+outputs/
+models/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large files
+*.npz
+*.pkl
+*.fits
+*.pdf
