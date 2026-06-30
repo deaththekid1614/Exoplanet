@@ -1,4 +1,4 @@
-"""Stage 4: Seven physics validation checks — FINAL FIX."""
+"""Stage 4: Seven physics validation checks — PROPER EB-CATCHING FIX."""
 
 from __future__ import annotations
 
@@ -27,45 +27,40 @@ BAND_WAVELENGTHS_NM = {
 
 
 # =============================================================================
-# CHECK 1: Depth vs Stellar Radius
+# CHECK 1: Depth vs Stellar Radius — HARD VETO FOR DEEP TRANSITS
 # =============================================================================
 def check_depth_vs_gaia(depth: float, r_star: float, bp_rp: float) -> float:
     """Depth check scaled by stellar radius. M dwarfs can have deep Jupiters."""
     if depth <= 0 or np.isnan(depth) or r_star <= 0:
         return 0.5
     
-    # Expected depths for this star
     jup_depth = expected_jupiter_depth(r_star)
     earth_depth = expected_earth_depth(r_star)
     depth_pct = depth * 100
     
-    # Veto: deeper than 3x Jupiter depth = definitely too deep (EB/blend)
-    max_plausible = jup_depth * 3.0 * 100  # convert to percent
+    # HARD VETO: deeper than 2x Jupiter depth = definitely too deep (EB/blend)
+    max_plausible = jup_depth * 2.0 * 100
     if depth_pct > max_plausible:
         return 0.0
     
-    # Veto: deeper than 2% around Sun-like, but scaled for small stars
-    # For M dwarfs (R=0.3), threshold is ~6.7%
-    sun_threshold = 2.0
+    # HARD VETO: deeper than 1.2% around Sun-like, scaled for small stars
+    sun_threshold = 1.2
     scaled_threshold = sun_threshold / max(r_star, 0.3)
     if depth_pct > scaled_threshold:
-        return 0.15
+        return 0.05  # Very strong EB indicator
     
-    # Shallow transits: reward if close to Earth/Jupiter range
     if depth_pct < earth_depth * 100 * 0.5:
-        # Too shallow, probably noise
         return 0.3
     
-    # Good depth range — score higher if close to expected Jupiter depth
     score = float(np.clip(1.0 - abs(depth_pct / 100 - jup_depth) / jup_depth, 0.3, 1.0))
     return score
 
+
 # =============================================================================
-# CHECK 2: Transit Shape — FIXED (variable-depth tolerance for comet-like planets)
+# CHECK 2: Transit Shape — V-SHAPE DETECTION FOR EBs
 # =============================================================================
 def check_ingress_egress_symmetry(time: np.ndarray, flux: np.ndarray, period: float, t0: float, duration: float) -> dict:
-    """Planet transits are flat-bottomed. EBs and blends are V-shaped.
-    Now tolerates variable-depth planets (e.g. disintegrating planets)."""
+    """Planet transits are flat-bottomed. EBs and blends are V-shaped."""
     phase, folded_flux = phase_fold(time, flux, period, t0)
     half_width = (duration / period) / 2
     in_transit = (phase < half_width) | (phase > 1 - half_width)
@@ -116,7 +111,7 @@ def check_ingress_egress_symmetry(time: np.ndarray, flux: np.ndarray, period: fl
     else:
         shape_score = 0.5
 
-    # NEW: Variable depth tolerance — check transit depth consistency across epochs
+    # Variable depth tolerance
     epochs = np.arange(t0, time.max() + period, period)
     transit_depths = []
     for epoch in epochs:
@@ -131,19 +126,29 @@ def check_ingress_egress_symmetry(time: np.ndarray, flux: np.ndarray, period: fl
 
     if len(transit_depths) > 2:
         depth_cv = np.std(transit_depths) / (np.mean(transit_depths) + 1e-10)
-        # Variable but not chaotic: comet-like planets have CV 0.2-1.0
-        # EBs have CV near 0 (constant) or >1.0 (very erratic)
         if 0.2 < depth_cv < 1.0:
             variable_depth_score = 1.0
         elif depth_cv < 0.2:
-            variable_depth_score = 0.7  # Consistent = good but not penalized
+            variable_depth_score = 0.7
         else:
-            variable_depth_score = 0.3  # Too chaotic
+            variable_depth_score = 0.3
     else:
         variable_depth_score = 0.5
 
-    # Combined shape score: allow variable-depth planets to pass
-    final_shape = (shape_score * 0.5 + symmetry * 0.2 + flatness * 0.1 + variable_depth_score * 0.2)
+    # V-SHAPE DETECTION: EBs have gradual ingress/egress (U or V shape)
+    # Planets have flat bottoms
+    ingress_slope_mag = abs(np.polyfit(np.arange(len(ingress_part)), ingress_part, 1)[0]) if len(ingress_part) > 2 else 0
+    egress_slope_mag = abs(np.polyfit(np.arange(len(egress_part)), egress_part, 1)[0]) if len(egress_part) > 2 else 0
+    
+    # V-shape penalty: if slopes are similar and significant, it's V-shaped (EB)
+    v_shape_penalty = 0.0
+    if ingress_slope_mag > 0.001 and egress_slope_mag > 0.001:
+        slope_ratio = min(ingress_slope_mag, egress_slope_mag) / max(ingress_slope_mag, egress_slope_mag)
+        if slope_ratio > 0.5:  # Similar slopes = symmetric V-shape
+            v_shape_penalty = 0.3
+    
+    final_shape = (shape_score * 0.5 + symmetry * 0.2 + flatness * 0.1 + variable_depth_score * 0.2) - v_shape_penalty
+    final_shape = max(0, final_shape)
 
     ingress_slope = 0.0
     egress_slope = 0.0
@@ -165,13 +170,14 @@ def check_ingress_egress_symmetry(time: np.ndarray, flux: np.ndarray, period: fl
 
 
 # =============================================================================
-# CHECK 3: Secondary Eclipse — FIXED (stricter + reflection effect detection)
+# CHECK 3: Secondary Eclipse — PROPER DETECTION
 # =============================================================================
 def check_secondary_eclipse(time: np.ndarray, flux: np.ndarray, period: float, t0: float, alpha: float = 0.05) -> float:
-    """Planets have NO secondary eclipse. EBs DO.
-    Also checks for reflection effect (sinusoidal variation outside eclipse)."""
+    """Planets have NO secondary eclipse. EBs DO."""
     phase, folded = phase_fold(time, flux, period, t0)
-    eclipse_window = 0.03
+    
+    # Wider search window for secondary eclipse
+    eclipse_window = 0.05
     at_eclipse = (phase > 0.5 - eclipse_window) & (phase < 0.5 + eclipse_window)
     oot = (phase > 0.65) | (phase < 0.1)
 
@@ -184,44 +190,43 @@ def check_secondary_eclipse(time: np.ndarray, flux: np.ndarray, period: float, t
 
     _, p_value = stats.ttest_ind(folded[at_eclipse], folded[oot], equal_var=False)
 
-    # NEW: Reflection effect check — EBs show sinusoidal variation at phases 0.25, 0.75
+    # Reflection effect check
     reflection_mask1 = (phase > 0.20) & (phase < 0.30)
     reflection_mask2 = (phase > 0.70) & (phase < 0.80)
     reflection_mask = reflection_mask1 | reflection_mask2
-    far_mask = (phase > 0.35) & (phase < 0.45)  # Far from both eclipses
+    far_mask = (phase > 0.35) & (phase < 0.45)
 
     if reflection_mask.sum() > 10 and far_mask.sum() > 10:
         reflection_var = np.std(folded[reflection_mask])
         far_var = np.std(folded[far_mask])
         reflection_ratio = reflection_var / (far_var + 1e-10)
-        if reflection_ratio > 2.0:
-            # Strong reflection effect = definitely EB
+        if reflection_ratio > 1.5:  # Lowered from 2.0
             return 0.0
 
-    # Significant secondary eclipse = EB = very low score
-    if p_value < alpha and eclipse_depth > 0.001:
-        return float(np.clip(1.0 - eclipse_depth / 0.005, 0.0, 0.2))
-    elif p_value < 0.1 and eclipse_depth > 0.0005:
-        return float(np.clip(1.0 - eclipse_depth / 0.003, 0.1, 0.5))
+    # PROPER THRESHOLDS: Even weak secondary eclipses are EB signatures
+    if p_value < alpha and eclipse_depth > 0.0003:  # Very sensitive
+        return float(np.clip(1.0 - eclipse_depth / 0.002, 0.0, 0.15))
+    elif p_value < 0.1 and eclipse_depth > 0.0001:
+        return float(np.clip(1.0 - eclipse_depth / 0.001, 0.05, 0.3))
     else:
         return 1.0
 
 
 # =============================================================================
-# CHECK 4: Odd-Even Consistency — FIXED (stricter)
+# CHECK 4: Odd-Even Consistency — PROPER EB DETECTION
 # =============================================================================
-def check_odd_even_consistency(time: np.ndarray, flux: np.ndarray, period: float, t0: float, tolerance: float = 0.15) -> dict:
+def check_odd_even_consistency(time: np.ndarray, flux: np.ndarray, period: float, t0: float, tolerance: float = 0.08, snr: float = 10.0) -> dict:
     """Odd vs even transit depths. PLANETS: same depth. EBs: different depths."""
     epochs = ((time - t0) / period).astype(int)
     unique_epochs = np.unique(epochs)
 
-    if len(unique_epochs) < 6:
+    if len(unique_epochs) < 4:  # Lowered from 6
         return {
             "odd_depth_mean": np.nan,
             "even_depth_mean": np.nan,
             "odd_even_ratio": 1.0,
-            "odd_even_score": 0.7,
-            "oddeven_score": 0.7,
+            "odd_even_score": 0.5,
+            "oddeven_score": 0.5,
         }
 
     half_width = 0.02
@@ -239,14 +244,13 @@ def check_odd_even_consistency(time: np.ndarray, flux: np.ndarray, period: float
             else:
                 odd_depths.append(depth)
 
-        if not odd_depths or not even_depths:
-
-            return {
+    if not odd_depths or not even_depths:
+        return {
             "odd_depth_mean": np.nan,
             "even_depth_mean": np.nan,
             "odd_even_ratio": 1.0,
-            "odd_even_score": 0.85,  # was 0.7 — more lenient when data is sparse
-            "oddeven_score": 0.85,
+            "odd_even_score": 0.6,
+            "oddeven_score": 0.6,
         }
 
     odd_mean = float(np.mean(odd_depths))
@@ -258,7 +262,15 @@ def check_odd_even_consistency(time: np.ndarray, flux: np.ndarray, period: float
         ratio = 1.0
 
     deviation = abs(ratio - 1.0)
+    
+    # STRICT: tolerance=0.08, EBs should show >20% difference typically
     score = float(np.clip(1.0 - deviation / tolerance, 0, 1))
+
+    # Minimal SNR leniency
+    if snr < 5.0:
+        score = 0.2 + 0.8 * score
+    elif snr < 8.0:
+        score = 0.1 + 0.9 * score
 
     return {
         "odd_depth_mean": odd_mean,
@@ -270,12 +282,11 @@ def check_odd_even_consistency(time: np.ndarray, flux: np.ndarray, period: float
 
 
 # =============================================================================
-# CHECK 5: Ellipsoidal Variation — NEW (strong EB discriminator)
+# CHECK 5: Ellipsoidal Variation — PROPER DETECTION
 # =============================================================================
 def check_ellipsoidal_variation(time: np.ndarray, flux: np.ndarray, period: float, t0: float) -> float:
     """Detect ellipsoidal variation (EB signature).
-    EBs show two peaks per period due to tidal distortion.
-    Planets show flat out-of-transit."""
+    EBs show two peaks per period due to tidal distortion."""
     phase, folded = phase_fold(time, flux, period, t0)
 
     n_bins = 20
@@ -311,6 +322,21 @@ def check_ellipsoidal_variation(time: np.ndarray, flux: np.ndarray, period: floa
     if std_flux < 0.0001:
         return 1.0
 
+    # PROPER ELLIPSOIDAL: Look for TWO peaks in the folded light curve
+    # EBs have maxima at phases 0.25 and 0.75 (quadrature)
+    # Find peaks in non-transit regions
+    from scipy.signal import find_peaks
+    peaks, props = find_peaks(smoothed[non_transit], height=np.median(smoothed[non_transit]))
+    
+    # Two distinct peaks = strong ellipsoidal (EB)
+    if len(peaks) >= 2:
+        peak_heights = props['peak_heights']
+        if len(peak_heights) >= 2:
+            # Check if peaks are roughly equal (ellipsoidal) vs one dominant (systematics)
+            height_ratio = min(peak_heights) / max(peak_heights)
+            if height_ratio > 0.6:  # Two similar peaks = ellipsoidal
+                return 0.0
+
     left = bin_centers < 0.5
     right = bin_centers >= 0.5
 
@@ -320,11 +346,12 @@ def check_ellipsoidal_variation(time: np.ndarray, flux: np.ndarray, period: floa
     asymmetry = abs(left_mean - right_mean) / (std_flux + 1e-10)
     peak_to_peak = (np.max(smoothed[non_transit]) - np.min(smoothed[non_transit])) / std_flux
 
-       # Raised thresholds: was 3.0/1.0, now 5.0/0.5
-    # Prevents planets with weak systematics from being vetoed
-    if peak_to_peak > 5.0 and asymmetry < 0.5:
-        return 0.0  # Strong ellipsoidal = EB
-    elif peak_to_peak > 3.0:
+    # PROPER THRESHOLDS
+    if peak_to_peak > 4.0 and asymmetry < 0.5:
+        return 0.0
+    elif peak_to_peak > 2.5 and asymmetry < 0.7 and period < 5.0:
+        return 0.2
+    elif peak_to_peak > 1.5:
         return 0.5
     else:
         return 1.0
@@ -339,6 +366,27 @@ def check_achromaticity(depth: float, teff: float) -> dict:
         return {"achromaticity_score": 0.6, "color_bands_agreement": 0.6}
 
     teff_norm = np.clip((teff - 3000) / 7000, 0, 1)
+    
+    # TIGHTENED: Deep transits are more suspicious
+    depth_ppm = depth * 1_000_000
+    if depth_ppm > 8_000:  # Was 10_000
+        depth_factor = 0.2  # Was 0.3
+    elif depth_ppm > 4_000:  # Was 5_000
+        depth_factor = 0.4  # Was 0.5
+    elif depth_ppm > 800:  # Was 1_000
+        depth_factor = 0.6  # Was 0.7
+    else:
+        depth_factor = 0.9
+    
+    if teff > 6500:
+        teff_factor = 0.6
+    elif teff > 5500:
+        teff_factor = 0.75
+    else:
+        teff_factor = 0.9
+    
+    score = depth_factor * teff_factor
+    score = float(np.clip(score, 0.1, 1.0))
     variation_amp = 0.01 + 0.05 * teff_norm
 
     rng = np.random.default_rng(int(teff) % 10000 + 42)
@@ -442,7 +490,20 @@ def extract_physics_features(candidate: dict, config: dict, run_centroid: bool =
     depth_score = check_depth_vs_gaia(depth, r_star, bp_rp)
     shape = check_ingress_egress_symmetry(time, flux, period, t0, duration)
     eclipse_score = check_secondary_eclipse(time, flux, period, t0, config["physics"]["secondary_eclipse_alpha"])
-    odd_even = check_odd_even_consistency(time, flux, period, t0, config["physics"]["odd_even_ratio_tolerance"])
+    
+    # Estimate SNR for odd/even leniency
+    transit_snr = candidate.get("snr", candidate.get("bls_sde", candidate.get("detection_snr", 10.0)))
+    if np.isnan(transit_snr) or transit_snr <= 0:
+        phase_quick, folded_quick = phase_fold(time, flux, period, t0)
+        oot_mask_quick = (phase_quick > 0.15) & (phase_quick < 0.85)
+        if np.sum(oot_mask_quick) > 10:
+            noise = np.std(folded_quick[oot_mask_quick])
+            transit_snr = float(depth / (noise + 1e-10)) if noise > 0 else 10.0
+        else:
+            transit_snr = 10.0
+    
+    odd_even = check_odd_even_consistency(time, flux, period, t0, config["physics"]["odd_even_ratio_tolerance"], snr=float(transit_snr))
+
     ellipsoidal = check_ellipsoidal_variation(time, flux, period, t0)
     achrom = check_achromaticity(depth, teff)
     atmosphere = check_atmosphere_proxy(shape["ingress_slope"], shape["egress_slope"], duration, period)
@@ -452,17 +513,15 @@ def extract_physics_features(candidate: dict, config: dict, run_centroid: bool =
     if run_centroid:
         centroid = check_centroid(tic_id, config)
 
-    # NEW: Weighted physics overall score
-    # nosec (0.25) and ellipsoidal (0.15) are strongest EB discriminators
-    # shape (0.15) now includes variable-depth tolerance
+    # EB-CATCHING WEIGHTS: nosec and oddeven dominate
     weights = {
         "depth_score": 0.15,
-        "shape_score": 0.15,
-        "nosec_score": 0.25,
-        "oddeven_score": 0.15,
-        "ellipsoidal_score": 0.15,
+        "shape_score": 0.10,
+        "nosec_score": 0.30,
+        "oddeven_score": 0.25,
+        "ellipsoidal_score": 0.10,
         "achrom_score": 0.05,
-        "atmos_score": 0.10,
+        "atmos_score": 0.05,
     }
 
     physics_scores = {
