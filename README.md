@@ -1,8 +1,6 @@
 # 🪐 TESS Transit Detection Pipeline
 
-> **CPU-only, end-to-end pipeline for detecting and classifying exoplanet transit candidates from NASA TESS full-frame image light curves.**
-> Built for batch sector analysis without GPU dependencies. No Hubble. No JWST. Just TESS + physics + ML.
-
+CPU-only pipeline for detecting exoplanet transit candidates from NASA TESS time-series photometry. Downloads light curves via MAST from TIC ID lists, validates with physics proxy checks (simulating Hubble/JWST vetting principles), and scores with an XGBoost + physics ensemble. No GPU required.
 ---
 
 ## 📋 Table of Contents
