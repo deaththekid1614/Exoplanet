@@ -1,6 +1,6 @@
 # 🪐 TESS Transit Detection Pipeline
 
-CPU-only pipeline for detecting exoplanet transit candidates from NASA TESS time-series photometry. Downloads light curves via MAST from TIC ID lists, validates with physics proxy checks (simulating Hubble/JWST vetting principles), and scores with an XGBoost + physics ensemble. No GPU required.
+>CPU-only pipeline for detecting exoplanet transit candidates from NASA TESS time-series photometry. Downloads light curves via MAST from >TIC ID lists, validates with physics proxy checks (simulating Hubble/JWST vetting principles), and scores with an XGBoost + physics >ensemble. No GPU required.
 ---
 
 ## 📋 Table of Contents
