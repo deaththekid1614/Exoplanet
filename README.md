@@ -17,7 +17,6 @@
 8. [Output Files](#-output-files)
 9. [Performance Notes](#-performance-notes)
 10. [Requirements](#-requirements)
-11. [License](#-license)
 
 ---
 
@@ -306,7 +305,6 @@ Pipeline behavior is controlled via `config/default.yaml`:
 | 4–7. Physics + ML + Ensemble | ~15 minutes |
 | 8. Plots (top 100 candidates) | ~10 minutes |
 
-> **💡 Pro tip:** Run Stage 1 overnight, then Stages 2–8 the following day.
 
 ---
 
