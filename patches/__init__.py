@@ -8,7 +8,7 @@ sys.dont_write_bytecode = True
 
 def apply_all_patches():
     patch_dir = os.path.dirname(os.path.abspath(__file__))
-    patches = ["patch_final_v2", "patch_eb_physics", "patch_snr_fix"]
+    patches = ["patch_final_v2", "patch_eb_physics", "patch_snr_fix", "patch_xgboost_fallback"]
     
     for name in patches:
         try:

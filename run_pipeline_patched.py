@@ -37,10 +37,20 @@ tess_pipeline.stage7_ensemble.ML_WEIGHT = 0.15
 tess_pipeline.stage7_ensemble.PHYSICS_WEIGHT = 0.55
 tess_pipeline.stage7_ensemble.DETECTION_WEIGHT = 0.30
 
+# ============================================================
+# XGBoost fallback — re-apply after all imports so stage5's
+# train_model is definitely the patched version regardless of
+# import order.
+# ============================================================
+import tess_pipeline.stage5_classify as s5
+from patches.patch_xgboost_fallback import _patched_train_model
+s5.train_model = _patched_train_model
+
 print("\n" + "="*70)
 print("  🔥 ENSEMBLE FIX vFINAL INJECTED")
 print("  ML: 15% | Physics: 55% | Detection: 30%")
 print("  ML BYPASS: Physics≥0.5 + BLS≥8 + TLS≥12 → ML floor=0.30")
+print("  🤖 ML trainer: Random Forest → XGBoost fallback (stage 5)")
 print("="*70 + "\n")
 
 if __name__ == "__main__":
